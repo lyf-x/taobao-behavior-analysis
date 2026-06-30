@@ -274,12 +274,13 @@ df = load_data()
 st.sidebar.title("📌 控制面板")
 
 with st.sidebar.expander("⏰ 时间范围筛选", expanded=True):
-    start_date, end_date = st.date_input(
-        "选择分析时间段",
-        value=[df['date'].min(), df['date'].max()],
-        min_value=df['date'].min(),
-        max_value=df['date'].max()
-    )
+    from datetime import date
+start_date, end_date = st.date_input(
+    "选择分析时间段",
+    value=[date(2017, 11, 25), date(2017, 12, 3)],
+    min_value=date(2017, 11, 25),
+    max_value=date(2017, 12, 3)
+)
 
 with st.sidebar.expander("🛒 行为类型筛选", expanded=True):
     behavior_list = st.multiselect(
