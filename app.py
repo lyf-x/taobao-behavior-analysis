@@ -178,7 +178,7 @@ def load_data():
     from pandas.tseries.offsets import Hour
 hours = pd.date_range(start_date, end_date, freq=Hour())
     
-    hour_weights = []
+hour_weights = []
     for h in hours.hour:
         if 0 <= h <= 5: hour_weights.append(0.12)
         elif 6 <= h <= 9: hour_weights.append(0.5)
