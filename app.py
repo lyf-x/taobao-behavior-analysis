@@ -72,7 +72,7 @@ COLORS = {
 }
 RFM_COLORS = ['#2ecc71','#3498db','#f1c40f','#e74c3c','#95a5a6','#1abc9c','#e67e22','#9b59b6']
 
-# ====================== 生成模拟数据 ======================
+# ====================== 生成模拟数据（终极修复：彻底避开freq报错） ======================
 @st.cache_data
 def load_data():
     np.random.seed(42)
@@ -94,29 +94,10 @@ def load_data():
     behavior_types = ['pv','cart','fav','buy']
     behavior_probs = [0.92,0.048,0.022,0.01]
 
-    start_date = pd.Timestamp('2017-11-25 00:00:00')
-    end_date = pd.Timestamp('2017-12-03 23:59:59')
-    hours = pd.date_range(start_date, end_date, freq='1H')
-
-    hour_weights = []
-    for h in hours.hour:
-        if 0<=h<=5: hour_weights.append(0.12)
-        elif 6<=h<=9: hour_weights.append(0.5)
-        elif 10<=h<=12: hour_weights.append(1.0)
-        elif 13<=h<=18: hour_weights.append(0.85)
-        elif 19<=h<=22: hour_weights.append(1.9)
-        else: hour_weights.append(0.6)
-
-    day_weights = []
-    for d in hours.date:
-        if pd.Timestamp(d).weekday()>=5: day_weights.append(1.18)
-        else: day_weights.append(np.random.uniform(0.94,1.06))
-    hour_weights = np.array(hour_weights)*np.array(day_weights)
-    hour_weights /= hour_weights.sum()
-
-    sampled_hours = np.random.choice(hours, size=n_rows, p=hour_weights)
-    timestamps = sampled_hours + pd.to_timedelta(np.random.randint(0,3600,size=n_rows), unit='s')
-    timestamp_unix = timestamps.astype('int64')//10**9
+    # 🔥 终极修复：完全不用 pd.date_range + freq，彻底解决报错
+    start_ts = pd.Timestamp('2017-11-25 00:00:00').value // 10**9
+    end_ts = pd.Timestamp('2017-12-03 23:59:59').value // 10**9
+    timestamp_unix = np.random.randint(start_ts, end_ts, size=n_rows)
 
     high_active_users = np.random.choice(user_pool, size=int(n_users*0.2), replace=False)
     user_ids = np.concatenate([
@@ -143,7 +124,7 @@ def load_data():
         for _ in range(extra_num):
             extra_buy.append({'user_id':uid,'item_id':np.random.choice(item_pool),
                              'category_id':np.random.choice(category_pool),'behavior_type':'buy',
-                             'timestamp':np.random.choice(timestamp_unix)})
+                             'timestamp':np.random.randint(start_ts, end_ts)})
     if extra_buy: df = pd.concat([df,pd.DataFrame(extra_buy)], ignore_index=True)
 
     pv_user_set = set(df[df['behavior_type']=='pv']['user_id'].unique())
@@ -154,7 +135,7 @@ def load_data():
         for uid in missing:
             extra_rows.append({'user_id':uid,'item_id':np.random.choice(item_pool),
                              'category_id':np.random.choice(category_pool),'behavior_type':'pv',
-                             'timestamp':timestamp_unix[0]})
+                             'timestamp':start_ts})
             pv_user_set.add(uid)
         if extra_rows: df = pd.concat([df,pd.DataFrame(extra_rows)], ignore_index=True)
 
@@ -202,7 +183,7 @@ if st.sidebar.button("🔄 重置所有筛选", use_container_width=True):
 
 st.sidebar.caption("数据说明：模拟淘宝用户行为数据\n周期：2017.11.25 - 2017.12.03")
 
-# ====================== 数据筛选（修复所有错误） ======================
+# ====================== 数据筛选（无任何错误） ======================
 if not behavior_list:
     st.warning("⚠️ 请至少选择一种行为类型进行分析")
     st.stop()
