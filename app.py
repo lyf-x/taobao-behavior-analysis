@@ -176,7 +176,7 @@ def load_data():
     start_date = pd.Timestamp('2017-11-25 00:00:00')
     end_date = pd.Timestamp('2017-12-03 23:59:59')
     from pandas.tseries.offsets import Hour
-    hours = pd.date_range(start_date, end_date, freq='H')
+    hours = pd.date_range(start_date, end_date, freq=Hour())
     
     hour_weights = []
     for h in hours.hour:
