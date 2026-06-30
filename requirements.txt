@@ -1,8 +1,5 @@
-numpy
-pandas
-matplotlib
-seaborn
-plotly
-streamlit
-folium
-scikit-learn
+streamlit==1.35.0
+pandas==2.2.2
+plotly==5.20.0
+numpy==1.26.4
+openpyxl
