@@ -175,8 +175,7 @@ def load_data():
 
     start_date = pd.Timestamp('2017-11-25 00:00:00')
     end_date = pd.Timestamp('2017-12-03 23:59:59')
-    from pandas.tseries.offsets import Hour
-    hours = pd.date_range(start_date, end_date, freq=Hour())
+    hours = pd.date_range(start_date, end_date, freq='H')
     
     hour_weights = []
     for h in hours.hour:
@@ -537,362 +536,247 @@ with tab_time:
     with tab_week:
         weekday_order = ['周一','周二','周三','周四','周五','周六','周日']
         if stat_mode == "按行为次数":
-            weekly = filtered_df.groupby(['weekday_cn','behavior_name']).size().reset_index(name='数值')
+            week_data = filtered_df.groupby(['weekday_cn','behavior_name']).size().reset_index(name='数值')
         else:
-            weekly = filtered_df.groupby(['weekday_cn','behavior_name'])['user_id'].nunique().reset_index()
-            weekly.columns = ['weekday_cn','behavior_name','数值']
-        
-        # 保证星期顺序
-        weekly['weekday_cn'] = pd.Categorical(weekly['weekday_cn'], categories=weekday_order, ordered=True)
-        weekly = weekly.sort_values('weekday_cn')
+            week_data = filtered_df.groupby(['weekday_cn','behavior_name'])['user_id'].nunique().reset_index()
+            week_data.columns = ['weekday_cn','behavior_name','数值']
         
         fig = px.bar(
-            weekly, x='weekday_cn', y='数值', color='behavior_name',
-            color_discrete_map=COLORS, text='数值' if show_data_label else None,
-            title='星期维度行为分布', template=plot_template
-        )
-        fig.update_layout(
-            barmode='stack', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-        )
-        if show_data_label:
-            fig.update_traces(textposition="inside")
-        st.plotly_chart(fig, use_container_width=True)
-
-# ====================== Tab3: 用户分析（RFM） ======================
-with tab_user:
-    st.subheader("用户价值分析（RFM模型）")
-    
-    # 仅筛选购买数据
-    buy_data = filtered_df[filtered_df['behavior_name'] == '购买']
-    if buy_data.empty:
-        st.warning("⚠️ 当前筛选条件下无购买数据，无法进行RFM分析")
-        st.stop()
-    
-    # 计算RFM指标
-    analysis_end = pd.Timestamp(end_date) + pd.Timedelta(days=1)
-    rfm = buy_data.groupby('user_id').agg({
-        'datetime': lambda x: (analysis_end - x.max()).days,  # R：最近购买天数
-        'user_id': 'count',  # F：购买频次
-        'amount': 'sum'  # M：消费金额
-    }).rename(columns={
-        'datetime': '最近购买时间',
-        'user_id': '购买频次',
-        'amount': '消费金额'
-    }).reset_index()
-    
-    # RFM打分（中位数二分）
-    rfm['R得分'] = np.where(rfm['最近购买时间'] <= rfm['最近购买时间'].median(), 2, 1)
-    rfm['F得分'] = np.where(rfm['购买频次'] >= rfm['购买频次'].median(), 2, 1)
-    rfm['M得分'] = np.where(rfm['消费金额'] >= rfm['消费金额'].median(), 2, 1)
-    
-    # 计算总分并分群
-    rfm['RFM总分'] = rfm['R得分'] + rfm['F得分'] + rfm['M得分']
-    def rfm_segment(row):
-        if row['R得分']==2 and row['F得分']==2 and row['M得分']==2:
-            return '高价值用户'
-        elif row['R得分']==2 and row['F得分']==1 and row['M得分']==2:
-            return '高潜力用户'
-        elif row['R得分']==1 and row['F得分']==2 and row['M得分']==2:
-            return '忠诚度用户'
-        elif row['R得分']==1 and row['F得分']==1 and row['M得分']==2:
-            return '挽留用户'
-        elif row['R得分']==2 and row['F得分']==2 and row['M得分']==1:
-            return '高频低消用户'
-        elif row['R得分']==2 and row['F得分']==1 and row['M得分']==1:
-            return '新用户'
-        elif row['R得分']==1 and row['F得分']==2 and row['M得分']==1:
-            return '沉睡用户'
-        else:
-            return '低价值用户'
-    
-    rfm['用户分层'] = rfm.apply(rfm_segment, axis=1)
-    
-    # 可视化RFM分层
-    rfm_count = rfm['用户分层'].value_counts().reset_index()
-    rfm_count.columns = ['用户分层', '用户数']
-    
-    col_rfm1, col_rfm2 = st.columns([2, 3])
-    with col_rfm1:
-        fig = px.pie(
-            rfm_count, values='用户数', names='用户分层',
-            color_discrete_sequence=RFM_COLORS,
-            title='用户分层分布', template=plot_template
+            week_data, x='weekday_cn', y='数值', color='behavior_name',
+            color_discrete_map=COLORS, category_orders={'weekday_cn': weekday_order},
+            text='数值' if show_data_label else None,
+            title='星期维度对比', template=plot_template
         )
         fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # 核心指标
-        total_buy_users = len(rfm)
-        repurchase_rate = round((rfm[rfm['购买频次']>=2].shape[0] / rfm.shape[0]) * 100, 2) if rfm.shape[0] > 0 else 0
-        avg_consume = round(rfm['消费金额'].mean(), 2)
-        
-        st.markdown(f"""
-        <div class="{card_style}">
-            <div class="metric-label">购买用户总数</div>
-            <div class="metric-value">{total_buy_users:,}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown(f"""
-        <div class="{card_style}">
-            <div class="metric-label">用户复购率</div>
-            <div class="metric-value">{repurchase_rate}%</div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown(f"""
-        <div class="{card_style}">
-            <div class="metric-label">平均消费金额</div>
-            <div class="metric-value">¥{avg_consume}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col_rfm2:
-        # RFM散点图（R vs M，大小=F）
-        fig = px.scatter(
-            rfm, x='最近购买时间', y='消费金额', size='购买频次',
-            color='用户分层', color_discrete_sequence=RFM_COLORS,
-            hover_data=['user_id', '购买频次'],
-            title='RFM用户价值分布（R=最近购买时间，M=消费金额，大小=F）',
-            template=plot_template
-        )
-        fig.update_layout(
-            xaxis_title='最近购买天数（越小越优）',
-            yaxis_title='消费金额（越大越优）',
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # 分层价值分析
-        rfm_value = rfm.groupby('用户分层')['消费金额'].agg(['sum', 'mean']).reset_index()
-        rfm_value.columns = ['用户分层', '总消费额', '人均消费额']
-        rfm_value['总消费额占比'] = round(rfm_value['总消费额'] / rfm_value['总消费额'].sum() * 100, 2)
-        
-        fig = px.bar(
-            rfm_value, x='用户分层', y='总消费额占比',
-            color='用户分层', color_discrete_sequence=RFM_COLORS,
-            text='总消费额占比', template=plot_template,
-            title='各分层消费额贡献占比'
-        )
-        fig.update_layout(
-            yaxis_title='消费额占比(%)',
-            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-        )
         if show_data_label:
-            fig.update_traces(textposition="top center")
+            fig.update_traces(textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+
+# ====================== Tab3: 用户分析 ======================
+with tab_user:
+    st.subheader("用户价值与行为分析")
+    
+    buy_data = filtered_df[filtered_df['behavior_name'] == '购买']
+    
+    if buy_data.empty:
+        st.info("当前筛选无购买数据，无法进行用户价值分析")
+    else:
+        st.markdown("### 一、RFM 用户价值分群")
+        
+        analysis_end = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+        
+        rfm = buy_data.groupby('user_id').agg(
+            最近购买时间=('datetime', 'max'),
+            购买频次=('user_id', 'count'),
+            消费金额=('amount', 'sum')
+        ).reset_index()
+        
+        rfm['R值'] = (analysis_end - rfm['最近购买时间']).dt.days
+        rfm['F值'] = rfm['购买频次']
+        rfm['M值'] = rfm['消费金额']
+
+        r_median = rfm['R值'].median()
+        rfm['R得分'] = rfm['R值'].apply(lambda x: 2 if x <= r_median else 1)
+        
+        f_median = rfm['F值'].median()
+        rfm['F得分'] = rfm['F值'].apply(lambda x: 2 if x >= f_median else 1)
+        
+        m_median = rfm['M值'].median()
+        rfm['M得分'] = rfm['M值'].apply(lambda x: 2 if x >= m_median else 1)
+        
+        def rfm_classify(row):
+            r, f, m = int(row['R得分']), int(row['F得分']), int(row['M得分'])
+            if r == 2 and f == 2 and m == 2: return '重要价值用户'
+            elif r == 2 and f == 1 and m == 2: return '重要发展用户'
+            elif r == 1 and f == 2 and m == 2: return '重要保持用户'
+            elif r == 1 and f == 1 and m == 2: return '重要挽留用户'
+            elif r == 2 and f == 2 and m == 1: return '一般价值用户'
+            elif r == 2 and f == 1 and m == 1: return '一般发展用户'
+            elif r == 1 and f == 2 and m == 1: return '一般保持用户'
+            else: return '一般挽留用户'
+        
+        rfm['用户类型'] = rfm.apply(rfm_classify, axis=1)
+        
+        rfm_stats = rfm['用户类型'].value_counts().reset_index()
+        rfm_stats.columns = ['用户类型', '用户数']
+        rfm_stats['占比'] = round(rfm_stats['用户数'] / rfm_stats['用户数'].sum() * 100, 1)
+        
+        col_rfm1, col_rfm2 = st.columns([2, 1])
+        with col_rfm1:
+            fig = px.pie(
+                rfm_stats, values='用户数', names='用户类型', hole=0.4,
+                color_discrete_sequence=RFM_COLORS,
+                title='付费用户价值分群分布', template=plot_template
+            )
+            fig.update_traces(textinfo='percent+label', textposition='outside')
+            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col_rfm2:
+            st.markdown("#### 分群明细")
+            st.dataframe(rfm_stats, hide_index=True, use_container_width=True)
+            st.caption("💡 重要发展用户占比最高，可通过优惠券刺激提升复购频次")
+        
+        st.markdown("---")
+        
+        st.markdown("### 二、复购行为分析")
+        freq_stats = rfm['购买频次'].value_counts().sort_index().reset_index()
+        freq_stats.columns = ['购买次数', '用户数']
+        
+        repurchase_rate = round((rfm[rfm['购买频次']>=2].shape[0] / rfm.shape[0]) * 100, 2)
+        
+        col_rep1, col_rep2 = st.columns([3, 1])
+        with col_rep1:
+            fig = px.bar(
+                freq_stats, x='购买次数', y='用户数',
+                text='用户数' if show_data_label else None,
+                title='用户购买频次分布', template=plot_template,
+                color_discrete_sequence=['#1f77b4']
+            )
+            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+            if show_data_label:
+                fig.update_traces(textposition="outside")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col_rep2:
+            st.markdown("#### 复购核心指标")
+            st.metric("用户复购率", f"{repurchase_rate}%")
+            st.metric("平均购买次数", round(rfm['购买频次'].mean(), 2))
+            st.metric("最高购买次数", int(rfm['购买频次'].max()))
+        
+        st.markdown("---")
+        
+        st.markdown("### 三、用户行为活跃度分布")
+        user_behavior_count = filtered_df.groupby('user_id').size().reset_index(name='行为次数')
+        
+        fig = px.histogram(
+            user_behavior_count, x='行为次数', nbins=30,
+            title='用户人均行为次数分布', template=plot_template,
+            color_discrete_sequence=['#2ca02c']
+        )
+        fig.update_layout(
+            yaxis_title='用户数量',
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
+        )
         st.plotly_chart(fig, use_container_width=True)
 
 # ====================== Tab4: 商品分析 ======================
 with tab_product:
-    st.subheader("商品/类目分析")
+    st.subheader("商品与类目分析")
     
-    analysis_type = st.radio("分析维度", ["按类目", "按商品"], horizontal=True)
+    col_set1, col_set2 = st.columns([1, 4])
+    with col_set1:
+        top_n = st.slider("显示Top N", 5, 20, 10)
+        sort_dim = st.radio("排序维度", ['点击量', '购买量', '成交额'])
     
-    if analysis_type == "按类目":
-        # 类目分析
-        cat_metrics = filtered_df.groupby('category_id').agg({
-            'user_id': 'nunique',
-            'behavior_name': lambda x: pd.Series(x).value_counts().to_dict()
-        }).reset_index()
-        
-        # 拆解行为类型数据
-        cat_metrics['点击用户数'] = cat_metrics['behavior_name'].apply(lambda x: x.get('点击', 0))
-        cat_metrics['加购用户数'] = cat_metrics['behavior_name'].apply(lambda x: x.get('加购', 0))
-        cat_metrics['收藏用户数'] = cat_metrics['behavior_name'].apply(lambda x: x.get('收藏', 0))
-        cat_metrics['购买用户数'] = cat_metrics['behavior_name'].apply(lambda x: x.get('购买', 0))
-        cat_metrics.drop('behavior_name', axis=1, inplace=True)
-        
-        # 计算核心指标
-        cat_metrics['总用户数'] = cat_metrics['user_id']
-        cat_metrics['转化率(%)'] = cat_metrics.apply(
-            lambda row: round(row['购买用户数']/row['点击用户数']*100,2) if row['点击用户数']>0 else 0,
-            axis=1
-        )
-        cat_metrics['加购率(%)'] = cat_metrics.apply(
-            lambda row: round(row['加购用户数']/row['点击用户数']*100,2) if row['点击用户数']>0 else 0,
-            axis=1
-        )
-        
-        # 排序展示Top10类目
-        cat_top10 = cat_metrics.nlargest(10, '总用户数')
-        
-        col_pro1, col_pro2 = st.columns([2, 3])
-        with col_pro1:
-            st.markdown("### 📈 类目核心指标（Top10）")
-            st.dataframe(
-                cat_top10[['category_id', '总用户数', '点击用户数', '购买用户数', '转化率(%)', '加购率(%)']],
-                use_container_width=True
-            )
-            
-            # 类目转化Top5
-            cat_conv_top5 = cat_metrics[cat_metrics['点击用户数']>=10].nlargest(5, '转化率(%)')
-            st.markdown("### 🎯 高转化类目（Top5）")
-            st.dataframe(
-                cat_conv_top5[['category_id', '点击用户数', '购买用户数', '转化率(%)']],
-                use_container_width=True
-            )
-        
-        with col_pro2:
-            # 类目用户数分布
-            fig = px.bar(
-                cat_top10, x='category_id', y='总用户数',
-                color='转化率(%)', color_continuous_scale='RdYlGn',
-                title='Top10类目用户数与转化率', template=plot_template
-            )
-            fig.update_layout(
-                xaxis_title='类目ID', yaxis_title='总用户数',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # 类目行为分布
-            cat_behavior = filtered_df[filtered_df['category_id'].isin(cat_top10['category_id'])].groupby(
-                ['category_id', 'behavior_name']
-            ).size().reset_index(name='数量')
-            
-            fig = px.bar(
-                cat_behavior, x='category_id', y='数量', color='behavior_name',
-                color_discrete_map=COLORS, barmode='stack',
-                title='Top10类目行为分布', template=plot_template
-            )
-            fig.update_layout(
-                xaxis_title='类目ID', yaxis_title='行为次数',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    sort_map = {'点击量':'点击', '购买量':'购买', '成交额':'购买'}
+    sort_behavior = sort_map[sort_dim]
+    
+    cat_data = filtered_df[filtered_df['behavior_name'] == sort_behavior]
+    
+    if sort_dim == '成交额':
+        cat_agg = cat_data.groupby('category_id')['amount'].sum().reset_index()
+        cat_agg.columns = ['category_id', '指标值']
     else:
-        # 商品分析
-        item_metrics = filtered_df.groupby('item_id').agg({
-            'user_id': 'nunique',
-            'behavior_name': lambda x: pd.Series(x).value_counts().to_dict(),
-            'amount': 'sum'
-        }).reset_index()
+        cat_agg = cat_data.groupby('category_id').size().reset_index()
+        cat_agg.columns = ['category_id', '指标值']
+    
+    if cat_agg.empty:
+        st.info(f"当前无{sort_dim}相关数据")
+    else:
+        top_cat = cat_agg.sort_values('指标值', ascending=False).head(top_n)
+        top_cat['category_id'] = top_cat['category_id'].astype(str)
         
-        item_metrics['点击用户数'] = item_metrics['behavior_name'].apply(lambda x: x.get('点击', 0))
-        item_metrics['加购用户数'] = item_metrics['behavior_name'].apply(lambda x: x.get('加购', 0))
-        item_metrics['收藏用户数'] = item_metrics['behavior_name'].apply(lambda x: x.get('收藏', 0))
-        item_metrics['购买用户数'] = item_metrics['behavior_name'].apply(lambda x: x.get('购买', 0))
-        item_metrics.drop('behavior_name', axis=1, inplace=True)
-        
-        item_metrics['转化率(%)'] = item_metrics.apply(
-            lambda row: round(row['购买用户数']/row['点击用户数']*100,2) if row['点击用户数']>0 else 0,
-            axis=1
+        fig = px.bar(
+            top_cat, x='指标值', y='category_id', orientation='h',
+            color='指标值', color_continuous_scale='Blues',
+            text='指标值' if show_data_label else None,
+            title=f'Top {top_n} 类目排行（按{sort_dim}）', template=plot_template
         )
-        item_metrics['销售额'] = item_metrics['amount']
-        
-        # Top10商品（按销售额）
-        item_top10 = item_metrics.nlargest(10, '销售额')
-        
-        col_pro1, col_pro2 = st.columns([2, 3])
-        with col_pro1:
-            st.markdown("### 📈 商品核心指标（Top10）")
-            st.dataframe(
-                item_top10[['item_id', 'user_id', '点击用户数', '购买用户数', '转化率(%)', '销售额']],
-                use_container_width=True
-            )
-            
-            # 高转化商品Top5
-            item_conv_top5 = item_metrics[item_metrics['点击用户数']>=5].nlargest(5, '转化率(%)')
-            st.markdown("### 🎯 高转化商品（Top5）")
-            st.dataframe(
-                item_conv_top5[['item_id', '点击用户数', '购买用户数', '转化率(%)']],
-                use_container_width=True
-            )
-        
-        with col_pro2:
-            # 商品销售额分布
-            fig = px.bar(
-                item_top10, x='item_id', y='销售额',
-                color='转化率(%)', color_continuous_scale='RdYlGn',
-                title='Top10商品销售额与转化率', template=plot_template
-            )
-            fig.update_layout(
-                xaxis_title='商品ID', yaxis_title='销售额(¥)',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # 商品行为分布
-            item_behavior = filtered_df[filtered_df['item_id'].isin(item_top10['item_id'])].groupby(
-                ['item_id', 'behavior_name']
-            ).size().reset_index(name='数量')
-            
-            fig = px.bar(
-                item_behavior, x='item_id', y='数量', color='behavior_name',
-                color_discrete_map=COLORS, barmode='stack',
-                title='Top10商品行为分布', template=plot_template
-            )
-            fig.update_layout(
-                xaxis_title='商品ID', yaxis_title='行为次数',
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(
+            yaxis={'categoryorder':'total ascending'},
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            showlegend=False
+        )
+        if show_data_label:
+            fig.update_traces(textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+    
+    st.markdown("### 类目转化健康度分析")
+    
+    pv_by_cat = filtered_df[filtered_df['behavior_name']=='点击'].groupby('category_id')['user_id'].nunique().reset_index()
+    pv_by_cat.columns = ['category_id', '点击用户数']
+    buy_by_cat = filtered_df[filtered_df['behavior_name']=='购买'].groupby('category_id')['user_id'].nunique().reset_index()
+    buy_by_cat.columns = ['category_id', '购买用户数']
+    
+    cat_conv = pd.merge(pv_by_cat, buy_by_cat, on='category_id', how='left').fillna(0)
+    cat_conv['转化率(%)'] = round(cat_conv['购买用户数'] / cat_conv['点击用户数'] * 100, 2) if not cat_conv.empty else 0
+    cat_conv = cat_conv[cat_conv['点击用户数'] >= 20]
+    cat_conv = cat_conv.sort_values('转化率(%)', ascending=False).head(15)
+    cat_conv['category_id'] = cat_conv['category_id'].astype(str)
+    
+    if not cat_conv.empty:
+        fig = px.scatter(
+            cat_conv, x='点击用户数', y='转化率(%)', size='购买用户数',
+            hover_name='category_id',
+            title='类目流量-转化率矩阵（气泡大小=购买用户数）',
+            template=plot_template,
+            color_discrete_sequence=['#ff7f0e']
+        )
+        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("💡 右上角为「高流量高转化」优质类目；左上角为「低流量高转化」潜力类目，可加大引流")
+    else:
+        st.info("当前筛选条件下无足够数据进行类目转化分析")
 
 # ====================== Tab5: 数据详情 ======================
 with tab_data:
-    st.subheader("原始数据详情与导出")
+    st.subheader("原始数据预览")
+    st.dataframe(
+        filtered_df.head(1000),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            'user_id': '用户ID',
+            'item_id': '商品ID',
+            'category_id': '类目ID',
+            'behavior_name': '行为类型',
+            'datetime': '时间',
+            'price': '商品价格',
+            'amount': '成交金额'
+        }
+    )
+    st.caption("仅展示前1000条，完整数据可下载")
     
-    # 数据预览
-    st.markdown("### 📋 筛选后数据预览（前1000行）")
-    preview_df = filtered_df.head(1000)[['user_id', 'item_id', 'category_id', 'behavior_name', 'datetime', 'price', 'amount']]
-    st.dataframe(preview_df, use_container_width=True)
+    st.markdown("---")
+    st.subheader("📥 数据导出")
     
-    # 数据导出
-    st.markdown("### 📤 数据导出")
-    col_export1, col_export2 = st.columns(2)
+    csv_data = filtered_df.to_csv(index=False).encode('utf-8-sig')
+    st.download_button(
+        label="下载 CSV 格式",
+        data=csv_data,
+        file_name=f'用户行为分析_{start_date}_{end_date}.csv',
+        mime='text/csv',
+        use_container_width=True
+    )
     
-    with col_export1:
-        export_format = st.radio("选择导出格式", ["Excel (.xlsx)", "CSV (.csv)"], horizontal=True)
+    if EXCEL_AVAILABLE:
+        def to_excel(df):
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='行为明细')
+            output.seek(0)
+            return output.getvalue()
         
-        if st.button("📥 导出筛选后数据", use_container_width=True):
-            # 准备导出数据
-            export_df = filtered_df[['user_id', 'item_id', 'category_id', 'behavior_name', 'datetime', 'date', 'hour', 'weekday_cn', 'price', 'amount']]
-            
-            # 处理导出
-            if export_format == "Excel (.xlsx)":
-                if not EXCEL_AVAILABLE:
-                    st.error("⚠️ 缺少Excel导出依赖，请安装：pip install openpyxl")
-                else:
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        export_df.to_excel(writer, sheet_name='淘宝用户行为数据', index=False)
-                    output.seek(0)
-                    st.download_button(
-                        label="📥 点击下载Excel文件",
-                        data=output,
-                        file_name=f"淘宝用户行为数据_{start_date}_至_{end_date}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-            else:
-                csv_data = export_df.to_csv(index=False, encoding='utf-8-sig')
-                st.download_button(
-                    label="📥 点击下载CSV文件",
-                    data=csv_data,
-                    file_name=f"淘宝用户行为数据_{start_date}_至_{end_date}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-    
-    with col_export2:
-        # 数据统计信息
-        st.markdown("### 📊 数据统计信息")
-        stats_df = pd.DataFrame({
-            '指标': [
-                '数据总行数', '独立用户数', '独立商品数', '独立类目数',
-                '点击次数', '加购次数', '收藏次数', '购买次数',
-                '数据时间范围'
-            ],
-            '数值': [
-                len(filtered_df),
-                filtered_df['user_id'].nunique(),
-                filtered_df['item_id'].nunique(),
-                filtered_df['category_id'].nunique(),
-                len(filtered_df[filtered_df['behavior_name']=='点击']),
-                len(filtered_df[filtered_df['behavior_name']=='加购']),
-                len(filtered_df[filtered_df['behavior_name']=='收藏']),
-                len(filtered_df[filtered_df['behavior_name']=='购买']),
-                f"{filtered_df['date'].min()} 至 {filtered_df['date'].max()}"
-            ]
-        })
-        st.dataframe(stats_df, use_container_width=True)
-
-# 补充缺失的Tab3/Tab4/Tab5完整逻辑（原代码裁剪部分补全）
+        excel_data = to_excel(filtered_df)
+        st.download_button(
+            label="下载 Excel 格式",
+            data=excel_data,
+            file_name=f'用户行为分析_{start_date}_{end_date}.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            use_container_width=True
+        )
+    else:
+        st.info("💡 如需导出 Excel 格式，请在终端执行 `pip install openpyxl` 安装依赖")
